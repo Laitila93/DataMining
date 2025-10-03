@@ -27,9 +27,10 @@ def preview_clusters(df, cat_col="categories", n_top=3):
         for cat, count in zip(top_cats.index, top_cats.values):
             print(f"{cat}: {count}")
 
-def plot_cluster_category_histograms(df, cat_col="categories", max_clusters=20, top_n=10):
+def plot_cluster_category_histograms(df, X=None, cat_col="categories", max_clusters=20, top_n=10):
     """
-    Show a grid of histograms of categories in each cluster.
+    Show a grid of histograms of categories in each cluster, with cohesion metrics.
+    Cohesion is defined as average squared distance to the cluster centroid.
     """
     clusters = sorted(df["cluster"].unique())
     n_clusters = min(len(clusters), max_clusters)
@@ -47,8 +48,20 @@ def plot_cluster_category_histograms(df, cat_col="categories", max_clusters=20, 
         counts = cluster_df[cat_col].value_counts().head(top_n)
         counts.plot(kind="bar", ax=ax)
 
+        # Cohesion metric (only if embeddings X provided)
+        cohesion = None
+        if X is not None and cluster_id != -1:
+            cluster_idx = cluster_df.index
+            cluster_points = X[cluster_idx]
+            centroid = cluster_points.mean(axis=0)
+            cohesion = np.mean(np.linalg.norm(cluster_points - centroid, axis=1) ** 2)
+
         cluster_label = cluster_id if cluster_id != -1 else "Noise"
-        ax.set_title(f"Cluster {cluster_label} (n={len(cluster_df)})")
+        title = f"Cluster {cluster_label} (n={len(cluster_df)})"
+        if cohesion is not None:
+            title += f"\nCohesion (Avg. SSE)={cohesion:.3f}"
+
+        ax.set_title(title)
         ax.set_ylabel("Count")
         ax.set_xlabel("Category")
 
@@ -57,6 +70,7 @@ def plot_cluster_category_histograms(df, cat_col="categories", max_clusters=20, 
         fig.delaxes(axes[j])
 
     plt.show()
+
 
 def kMeans(X, df, k):
     kmeans = KMeans(n_clusters=k, n_init=10)
@@ -76,46 +90,7 @@ def kMeans(X, df, k):
     plt.show()
 
     # Show category histograms
-    plot_cluster_category_histograms(df, cat_col="categories", max_clusters=20, top_n=10)
-
-def dbscan_with_pca(X, df=None, eps=0.5, min_samples=5, pca_dim=10):
-    cat_col = "categories"
-
-    pca = PCA(n_components=pca_dim)
-    X_reduced = pca.fit_transform(X)
-    print(f"Reduced embeddings shape: {X_reduced.shape}")
-
-    neighbors = NearestNeighbors(n_neighbors=min_samples)
-    neighbors.fit(X_reduced)
-    distances, _ = neighbors.kneighbors(X_reduced)
-    k_distances = np.sort(distances[:, -1])
-
-    plt.figure(figsize=(8,5))
-    plt.plot(k_distances)
-    plt.xlabel("Points sorted by distance")
-    plt.ylabel(f"{min_samples}-NN distance")
-    plt.title("k-distance plot for DBSCAN eps selection")
-    plt.show()
-
-    db = DBSCAN(eps=eps, min_samples=min_samples)
-    db.fit(X_reduced)
-    labels = db.labels_
-    n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
-    n_noise = list(labels).count(-1)
-
-    print(f"DBSCAN results: {n_clusters} clusters, {n_noise} noise points")
-
-    if df is not None:
-        df["cluster"] = labels
-        preview_clusters(df, cat_col=cat_col, n_top=3)
-        plot_cluster_category_histograms(df, cat_col="categories", max_clusters=20, top_n=10)
-
-    mask = labels != -1
-    if np.sum(mask) > 1 and n_clusters > 1:
-        dbi_score = DBI(X_reduced[mask], labels[mask])
-        print(f"Davies-Bouldin Index (excluding noise): {dbi_score:.4f}")
-    else:
-        print("Not enough clusters or points to compute DBI.")
+    plot_cluster_category_histograms(df, X, cat_col="categories", max_clusters=20, top_n=10)
 
 if __name__ == "__main__":
     df, X = load_embeddings_from_csv("arxiv_with_embeddings_specter_2.csv")
