@@ -6,6 +6,10 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import davies_bouldin_score as DBI
 from sklearn.decomposition import PCA
 from sklearn.neighbors import NearestNeighbors
+from matplotlib.patches import Patch
+import seaborn as sns
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.preprocessing import normalize
 
 def load_embeddings_from_csv(filename="df_with_embeddings.csv"):
     df = pd.read_csv(filename)
@@ -26,6 +30,7 @@ def preview_clusters(df, cat_col="categories", n_top=3):
         print(f"\n--- Cluster {cluster_label} (size: {cluster_size}) ---")
         for cat, count in zip(top_cats.index, top_cats.values):
             print(f"{cat}: {count}")
+
 
 def plot_cluster_category_histograms(df, X=None, cat_col="categories", max_clusters=20, top_n=10):
     """
@@ -70,25 +75,76 @@ def plot_cluster_category_histograms(df, X=None, cat_col="categories", max_clust
         fig.delaxes(axes[j])
 
     plt.show()
+def plot_similarity_matrix(X, labels=None, sample_size=200):
 
+    # If dataset is large, sample to avoid massive heatmaps
+    if X.shape[0] > sample_size:
+        idx = np.random.choice(X.shape[0], size=sample_size, replace=False)
+        X = X[idx]
+        if labels is not None:
+            labels = np.array(labels)[idx]
+
+    # Compute cosine similarity
+    sim_matrix = cosine_similarity(X)
+
+    # Make heatmap
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(sim_matrix, cmap="viridis", xticklabels=False, yticklabels=False)
+    plt.title("Cosine Similarity Heatmap")
+    plt.show()
+
+    return sim_matrix
 
 def kMeans(X, df, k):
-    kmeans = KMeans(n_clusters=k, n_init=10)
+
+    kmeans = KMeans(n_clusters=k)
     kmeans.fit(X)
     labels = kmeans.labels_
     df["cluster"] = labels
 
-    preview_clusters(df, cat_col="categories")
+    # preview_clusters(df, cat_col="categories")
     print(f"K = {k}, DB-index = {DBI(X, kmeans.labels_)}")
 
     pca = PCA(n_components=2)
     X_pca = pca.fit_transform(X)
 
-    plt.figure(figsize=(8,6))
-    plt.scatter(X_pca[:,0], X_pca[:,1], c=labels, cmap="tab10", s=5)
-    plt.title("Text Clusters (PCA projection)")
+    # --- Plot 1: clusters ---
+    plt.figure(figsize=(8, 6))
+    scatter = plt.scatter(X_pca[:, 0], X_pca[:, 1], c=labels, cmap="tab20", alpha=0.7)
+
+    # Manual legend for clusters
+    legend_elements = [Patch(facecolor=scatter.cmap(scatter.norm(i)),
+                             label=f"Cluster {i}") for i in range(k)]
+    plt.legend(handles=legend_elements,
+               title="Clusters",
+               bbox_to_anchor=(1.05, 1),
+               loc='upper left')
+    plt.title("PCA projection colored by CLUSTERS")
+    plt.xlabel("PC1")
+    plt.ylabel("PC2")
+    plt.tight_layout()
     plt.show()
 
+    # --- Plot 2: categories ---
+    plt.figure(figsize=(8, 6))
+    cat_labels, uniques = pd.factorize(df["categories"])
+    scatter = plt.scatter(X_pca[:, 0], X_pca[:, 1], c=cat_labels, cmap="tab20", alpha=0.7)
+
+    # Manual legend for categories
+    legend_elements = [Patch(facecolor=scatter.cmap(scatter.norm(i)),
+                             label=cat) for i, cat in enumerate(uniques)]
+    plt.legend(handles=legend_elements,
+               title="Categories",
+               bbox_to_anchor=(1.05, 1),
+               loc='upper left')
+    plt.title("PCA projection colored by CATEGORIES")
+    plt.xlabel("PC1")
+    plt.ylabel("PC2")
+    plt.tight_layout()
+    plt.show()
+
+    # Optional similarity matrix
+    plot_similarity_matrix(X, labels, 200)
     # Show category histograms
     plot_cluster_category_histograms(df, X, cat_col="categories", max_clusters=20, top_n=10)
 
