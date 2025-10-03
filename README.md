@@ -24,13 +24,34 @@ From these, we kept only a minimal subset relevant to our task.
 - **submitter** – name/email of the submitting author  
 - **other auxiliary metadata fields** not required for text classification  
 
-
-
 ### 2. Format Conversion
 - Converted the dataset from **JSON** to **CSV** for easier processing with pandas.  
 
+### 3. Grouping of categories
+Sub-categories are replaced with their parent category to reduce the number of categories,
+resulting in the following categories:
+- **astro-ph**
+- **cond-mat**
+- **cs**
+- **econ**
+- **eess**
+- **gr-qc**
+- **hep-ex**
+- **hep-lat**
+- **hep-ph**
+- **hep-th**
+- **math**
+- **math-ph**
+- **nlin**
+- **nucl-ex**
+- **nucl-th**
+- **physics**
+- **q-bio**
+- **q-fin**
+- **quant-ph**
+- **stat**
 
-### 3. Category Normalization
+### 4. Category Normalization
 - From the `categories` field, only the **first listed category** was retained (the primary category in arXiv).  
 - Extracted the **main category prefix** (the part before the dot).  
 
