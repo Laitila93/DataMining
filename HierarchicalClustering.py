@@ -1,104 +1,131 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.metrics import davies_bouldin_score as DBI
+import seaborn as sns
 from sklearn.decomposition import PCA
+from sklearn.metrics import (
+    davies_bouldin_score, 
+    silhouette_score, 
+    normalized_mutual_info_score
+    )
 from sklearn.cluster import AgglomerativeClustering
 from scipy.cluster.hierarchy import linkage, dendrogram
 
 def load_embeddings_from_csv(filename="df_with_embeddings.csv"):
     df = pd.read_csv(filename)
-    # Extract embeddings (all columns starting with "emb_")
     emb_cols = [c for c in df.columns if c.startswith("emb_")]
     X = df[emb_cols].values
     print(f"Loaded {X.shape[0]} embeddings of size {X.shape[1]}")
     return df, X
 
-def preview_clusters(df, cat_col="categories", n_top=3):
-    """
-    Print cluster size and the top N categories with their percentage for each cluster,
-    including noise if present.
-    """
-    for cluster_id, group in df.groupby("cluster"):
-        cluster_label = cluster_id if cluster_id != -1 else "Noise"
-        cluster_size = len(group)
+def hierarchical_clustering(X, df=None, n_clusters=None, linkage_method="average", cat_col=None):
+    X_reduced = PCA(n_components=50, random_state=42).fit_transform(X)
 
-        # Compute category counts and percentages
-        cat_counts = group[cat_col].value_counts()
-        top_cats = cat_counts.head(n_top)
-        top_cats_pct = top_cats / cluster_size * 100
+    # Select n number of clusters based on best silhouette score
+    if n_clusters is None:
+        print(" Searching for optimal number of clusters")
+        scores = { k: silhouette_score(X_reduced, 
+                                       AgglomerativeClustering(
+                                           n_clusters=k, 
+                                           metric="cosine", 
+                                           linkage=linkage_method
+                                        ).fit_predict(X_reduced)) for k in range(5, 31, 5)
+        }
+        n_clusters, best_sil = max(scores, key=scores.get), max(scores.values())
+        print(f"Best k={n_clusters} (Silhouette={best_sil:.3f})")
+    labels = AgglomerativeClustering(n_clusters=n_clusters, 
+                                     metric="cosine", 
+                                     linkage=linkage_method
+                                     ).fit_predict(X_reduced)
 
-        # Print cluster info
-        print(f"\n--- Cluster {cluster_label} (size: {cluster_size}) ---")
-        for cat, pct in zip(top_cats.index, top_cats_pct):
-            print(f"{cat}: {pct:.1f}%")
 
-
-def hierarchical_clustering(X, df, n_clusters=10, linkage="ward", pca_dim=50):
-
-    # Reduce embeddings first
-    if X.shape[1] > pca_dim:
-        pca = PCA(n_components=pca_dim)
-        X = pca.fit_transform(X)
-        print(f"Reduced dimensions to {X.shape[1]} with PCA")
-    
-    hc = AgglomerativeClustering(n_clusters=n_clusters, linkage=linkage)
-    labels = hc.fit_predict(X)
     df["cluster"] = labels
+    # Validation scores (silhouette and db)
+    sil = silhouette_score(X_reduced, labels)
+    dbi = davies_bouldin_score(X_reduced, labels)
+    print(f" Silhouette Score: {sil:.3f}")
+    print(f" Davies–Bouldin Index: {dbi:.3f}")
+      
 
-    # Preview cluster info
-    preview_clusters(df, cat_col="categories")
+    if df is not None and cat_col:
+        purity, nmi = evaluate_clusters(df, cat_col)
+        preview_clusters(df, cat_col)
+        print(f"Average purity={purity:.3f}, NMI={nmi:.3f}")
 
-    # Evaluate clustering with Davies-Bouldin Index
-    if n_clusters > 1:
-        dbi_score = DBI(X, labels)
-        print(f"Hierarchical Clustering (linkage={linkage})")
-        print(f"Clusters: {n_clusters}, DBI = {dbi_score:.4f}")
-    else:
-        print("Not enough clusters to compute DBI.")
+    return labels
 
-    # Reduce to 2D with PCA for visualization
-    pca = PCA(n_components=2)
-    X_pca = pca.fit_transform(X)
 
-    plt.figure(figsize=(8,6))
-    plt.scatter(X_pca[:,0], X_pca[:,1], c=labels, cmap="tab10")
-    plt.title(f"Hierarchical Clustering (PCA projection, linkage={linkage})")
-    plt.show()
+def evaluate_clusters(df, cat_col="categories", cluster_col="cluster"):
+    # Compute average cluster purity
+    purities = [        
+        group[cat_col].value_counts().max() / len(group)
+        for _, group in df.groupby(cluster_col)
+    ]
+    avg_purity = np.mean(purities)
+    nmi = normalized_mutual_info_score(df[cat_col], df[cluster_col])
+    return avg_purity, nmi
 
-def plot_dendrogram(X, sample_size=200):
 
-    # Reduce dataset size for dendrogram
-    if X.shape[0] > sample_size:
-        idx = np.random.choice(X.shape[0], sample_size, replace=False)
-        X = X[idx]
-        print(f"Using {sample_size} samples for dendrogram")
+#top categories for cluster
+def preview_clusters(df, cat_col="categories", n_top=3):
+    for cid, group in df.groupby("cluster"):
+        top = group[cat_col].value_counts().head(n_top)
+        print(f"\nCluster {cid} (n={len(group)}):")
+        print(top.to_string())
 
-    # Reduce dimensionality with PCA for speed
-    if X.shape[1] > 50:
-        pca = PCA(n_components=50)
-        X = pca.fit_transform(X)
-        print(f"Reduced to {X.shape[1]} dimensions with PCA")
 
-    # Compute the linkage matrix
-    Z = linkage(X, method="ward")  
+# Plot the dendrogram with sample size = 100 for vizualisation
+def plot_dendrogram(df, X, sample_size=100, method="average", label_col="categories"):
 
-    # Plot the dendrogram
-    plt.figure(figsize=(12, 6))
-    dendrogram(Z, truncate_mode="level", p=5)
-    plt.title("Hierarchical Clustering Dendrogram (truncated)")
-    plt.xlabel("Sample index or (cluster size)")
+    n = min(sample_size, len(X))
+    sample_idx = np.random.choice(len(X), size=n, replace=False)
+    X_sample = X[sample_idx]
+
+    labels = df.iloc[sample_idx][label_col].astype(str).values
+
+    Z = linkage(X_sample, method=method)
+
+    plt.figure(figsize=(16, 6))
+    dendrogram(
+        Z,
+        labels=labels,
+        leaf_rotation=90,
+        leaf_font_size=10,
+        truncate_mode=None
+    )
+    plt.title(f"Hierarchical Clustering Dendrogram ({method})")
+    plt.xlabel(label_col)
     plt.ylabel("Distance")
+    plt.tight_layout()
     plt.show()
+
+# Heatmap to evaluate category distribution in clusters
+def cluster_category_heatmap(df, cat_col="categories", cluster_col="cluster"):
+
+    overlap = pd.crosstab(df[cluster_col], df[cat_col], normalize='index')
+
+    plt.figure(figsize=(12, 6))
+    sns.heatmap(overlap, cmap='viridis')
+    plt.title("Cluster × Category Fraction Heatmap")
+    plt.xlabel("Category")
+    plt.ylabel("Cluster")
+    plt.tight_layout()
+    plt.show()
+
+
 
 if __name__ == "__main__":
     df, X = load_embeddings_from_csv("arxiv_with_embeddings_specter_2.csv")
-    
-    # Sample before dendrogram 
-    plot_dendrogram(X, sample_size=300)  
 
-    # Hierarchical clustering on sample
     df_sample = df.sample(n=5000, random_state=42)
-    X_sample = df_sample[[c for c in df.columns if c.startswith("emb_")]].values
-    hierarchical_clustering(X_sample, df_sample, n_clusters=15, linkage="ward")
+    X_sample = df_sample.filter(like="emb_").values
 
+    hierarchical_clustering(
+        X_sample,
+        df_sample,
+        cat_col="categories"
+    )
+
+    plot_dendrogram(df, X, sample_size=100, label_col="categories")
+
+    cluster_category_heatmap(df_sample)
