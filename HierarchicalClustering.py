@@ -2,6 +2,9 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+
+import umap
+
 from sklearn.decomposition import PCA
 from sklearn.metrics import (
     davies_bouldin_score, 
@@ -18,8 +21,15 @@ def load_embeddings_from_csv(filename="df_with_embeddings.csv"):
     print(f"Loaded {X.shape[0]} embeddings of size {X.shape[1]}")
     return df, X
 
-def hierarchical_clustering(X, df=None, n_clusters=None, linkage_method="average", cat_col=None):
-    X_reduced = PCA(n_components=50, random_state=42).fit_transform(X)
+def hierarchical_clustering(X, df=None, n_clusters=None, linkage_method="average", cat_col=None, n_components=50):
+   # X_reduced = PCA(n_components=50, random_state=42).fit_transform(X)
+    print(f"Reducing dimensions with UMAP → {n_components} components")
+    reducer = umap.UMAP(
+        n_components=n_components,
+        metric="cosine",
+        random_state=42
+    )
+    X_reduced = reducer.fit_transform(X)
 
     # Select n number of clusters based on best silhouette score
     if n_clusters is None:
@@ -123,7 +133,8 @@ if __name__ == "__main__":
     hierarchical_clustering(
         X_sample,
         df_sample,
-        cat_col="categories"
+        cat_col="categories",
+        n_components=50,
     )
 
     plot_dendrogram(df, X, sample_size=100, label_col="categories")
